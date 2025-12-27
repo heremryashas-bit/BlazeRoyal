@@ -3,74 +3,129 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Firegrounds - PUBG + FreeFire Web</title>
+    <title>Blaze Royal - PUBG + FreeFire Web (No Install!)</title>
     <style>
-        body { margin: 0; background: #111; overflow: hidden; font-family: Arial; }
+        body { margin: 0; background: #111; overflow: hidden; font-family: Arial; color: white; }
         canvas { display: block; }
-        #ui { position: absolute; top: 10px; left: 10px; color: white; font-size: 20px; z-index: 10; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 100; font-size: 18px; text-shadow: 2px 2px 4px #000; }
+        #controls { position: absolute; bottom: 20px; left: 20px; z-index: 100; }
+        #shoot { position: absolute; bottom: 20px; right: 20px; width: 80px; height: 80px; background: #ff4444; border-radius: 50%; border: 4px solid #fff; z-index: 100; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 </head>
 <body>
-    <div id="ui">Health: <span id="health">100</span> | Score: <span id="score">0</span></div>
+    <div id="ui">
+        Health: <span id="health">100</span> | Kills: <span id="kills">0</span> | Zone: <span id="zone">100%</span>
+    </div>
+    <div id="shoot"></div>
     <script>
         const config = {
             type: Phaser.AUTO,
             width: window.innerWidth,
             height: window.innerHeight,
-            physics: { default: 'arcade', arcade: { gravity: { y: 0 } } },
+            backgroundColor: '#228B22', // PUBG green map
+            physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+            fps: { target: 60, forceSetTimeOut: true }, // Smooth 60FPS
             scene: {
                 preload: function() {
-                    // Free CC0 assets (Kenney/Opengameart)
-                    this.load.image('map', 'https://opengameart.org/sites/default/files/tilset_512.png'); // PUBG-style island
-                    this.load.spritesheet('player', 'https://opengameart.org/sites/default/files/green_tank_small.png', { frameWidth: 32, frameHeight: 32 }); // FreeFire-style character
-                    this.load.image('bullet', 'https://opengameart.org/sites/default/files/bullet_2.png');
-                    this.load.image('car', 'https://opengameart.org/sites/default/files/car.png'); // PUBG vehicle
-                    this.load.image('enemy', 'https://opengameart.org/sites/default/files/red_tank_small.png');
+                    // Small, free CC0 assets (optimized <50KB total)
+                    this.load.image('map', 'https://labs.phaser.io/assets/skies/sky4.png'); // Fast load map bg
+                    this.load.image('player', 'https://labs.phaser.io/assets/sprites/phaser-dude.png'); // FreeFire-style player
+                    this.load.image('bullet', 'https://labs.phaser.io/assets/particles/yellow.png'); // Small bullet
+                    this.load.image('enemy', 'https://labs.phaser.io/assets/sprites/alien.png'); // Bot
+                    this.load.image('car', 'https://labs.phaser.io/assets/sprites/car90.png'); // PUBG vehicle
+                    this.load.image('loot', 'https://labs.phaser.io/assets/sprites/mushroom2.png'); // Loot crate
                 },
                 create: function() {
-                    this.add.image(400, 300, 'map').setScale(1.5); // Large PUBG map
-                    this.player = this.physics.add.sprite(100, 500, 'player');
+                    // PUBG large map
+                    this.add.image(this.cameras.main.centerX, this.cameras.main.centerY, 'map').setScale(2);
+                    // Player (FreeFire dash speed)
+                    this.player = this.physics.add.sprite(100, this.scale.height - 100, 'player');
                     this.player.setCollideWorldBounds(true);
+                    this.player.setScale(1.5);
                     this.player.health = 100;
-                    this.cursors = this.input.keyboard.createCursorKeys();
-                    this.bullets = this.physics.add.group();
-                    // FreeFire dash (space double-tap)
-                    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-                    // PUBG vehicle loot
-                    this.car = this.physics.add.sprite(600, 400, 'car');
-                    // Bots (FreeFire fast AI)
-                    this.enemies = this.physics.add.group();
-                    for (let i = 0; i < 5; i++) {
-                        let enemy = this.enemies.create(Phaser.Math.Between(200, 800), Phaser.Math.Between(100, 500), 'enemy');
+                    // Bullet pool (smooth, no spam lag)
+                    this.bullets = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 50 });
+                    // Enemy pool (PUBG bots)
+                    this.enemies = this.physics.add.group({ classType: Phaser.Physics.Arcade.Sprite, maxSize: 20 });
+                    for (let i = 0; i < 10; i++) {
+                        let enemy = this.enemies.get(Phaser.Math.Between(200, this.scale.width - 200), Phaser.Math.Between(100, this.scale.height - 200), 'enemy');
+                        enemy.setScale(1.2);
+                        enemy.health = 50;
                     }
-                    this.physics.add.collider(this.player.bullets, this.enemies, this.hitEnemy, null, this);
+                    // Loot crates (PUBG style)
+                    this.loot = this.physics.add.group();
+                    for (let i = 0; i < 5; i++) {
+                        this.loot.create(Phaser.Math.Between(200, this.scale.width - 200), Phaser.Math.Between(100, this.scale.height - 200), 'loot');
+                    }
+                    // Vehicle (PUBG drive)
+                    this.car = this.physics.add.sprite(600, 400, 'car').setScale(0.5);
+                    // Collisions (smooth physics)
+                    this.physics.add.collider(this.bullets, this.enemies, this.hitEnemy, null, this);
+                    this.physics.add.collider(this.player, this.loot, this.pickLoot, null, this);
+                    this.physics.add.overlap(this.player, this.car, this.enterCar, null, this);
+                    // Touch controls (mobile smooth)
+                    let shootBtn = document.getElementById('shoot');
+                    shootBtn.addEventListener('touchstart', () => this.shootBullet());
+                    shootBtn.addEventListener('click', () => this.shootBullet());
+                    // Zone shrink (FreeFire 10-min timer)
+                    this.zoneRadius = 400;
+                    this.zone = this.add.circle(this.scale.width / 2, this.scale.height / 2, this.zoneRadius, 0xff0000);
+                    this.zone.setAlpha(0.3);
+                    this.time.addEvent({ delay: 10000, callback: this.shrinkZone, callbackScope: this, loop: true });
+                    // UI update
+                    this.time.addEvent({ delay: 100, callback: this.updateUI, callbackScope: this, loop: true });
                 },
                 update: function() {
+                    // Smooth player movement (FreeFire dash speed)
                     this.player.setVelocity(0);
-                    if (this.cursors.left.isDown) this.player.setVelocityX(-300); // FreeFire speed
-                    if (this.cursors.right.isDown) this.player.setVelocityX(300);
-                    if (this.cursors.up.isDown) this.player.setVelocityY(-300);
-                    if (this.cursors.down.isDown) this.player.setVelocityY(300);
-                    // Shoot
-                    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
-                        let bullet = this.bullets.create(this.player.x + 20, this.player.y, 'bullet');
-                        bullet.setVelocityX(500); // Fast FreeFire shoot
-                        bullet.setVelocityY(0);
+                    if (this.input.keyboard.addKey('A').isDown || this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT).isDown) this.player.setVelocityX(-400);
+                    if (this.input.keyboard.addKey('D').isDown || this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT).isDown) this.player.setVelocityX(400);
+                    if (this.input.keyboard.addKey('W').isDown || this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP).isDown) this.player.setVelocityY(-400);
+                    if (this.input.keyboard.addKey('S').isDown || this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN).isDown) this.player.setVelocityY(400);
+                    // Touch joystick simulation (smooth mobile)
+                    if (this.input.activePointer.isDown) {
+                        let angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, this.input.activePointer.x, this.input.activePointer.y);
+                        this.player.setVelocity(Math.cos(angle) * 400, Math.sin(angle) * 400);
                     }
-                    // Enemy AI chase (FreeFire intense)
+                    // Enemy AI (FreeFire chase)
                     this.enemies.children.entries.forEach(enemy => {
-                        this.physics.moveToObject(enemy, this.player, 150);
+                        if (enemy.active) this.physics.moveToObject(enemy, this.player, 150);
                     });
-                    // Vehicle enter (PUBG style)
-                    if (Phaser.Geom.Intersects.RectangleToRectangle(this.player.getBounds(), this.car.getBounds())) {
-                        this.player.setVelocity(400, 0); // Drive fast
+                    // Zone damage (PUBG shrink)
+                    this.physics.overlap(this.player, this.zone, () => this.player.health -= 0.5);
+                },
+                shootBullet: function() {
+                    if (this.bullets.isFull()) return; // Pool limit for smoothness
+                    let bullet = this.bullets.get(this.player.x + 30, this.player.y, 'bullet');
+                    if (bullet) {
+                        bullet.setActive(true).setVisible(true);
+                        bullet.setVelocityX(600).setVelocityY(0); // Fast FreeFire shoot
                     }
                 },
                 hitEnemy: function(bullet, enemy) {
-                    enemy.destroy();
+                    enemy.health -= 25;
                     bullet.destroy();
-                    document.getElementById('score').textContent = parseInt(document.getElementById('score').textContent) + 10;
+                    if (enemy.health <= 0) {
+                        enemy.destroy();
+                        document.getElementById('kills').textContent = parseInt(document.getElementById('kills').textContent) + 1;
+                    }
+                },
+                pickLoot: function(player, loot) {
+                    loot.destroy();
+                    player.health = Math.min(100, player.health + 20);
+                },
+                enterCar: function(player, car) {
+                    player.setVelocityX(600); // PUBG drive boost
+                },
+                shrinkZone: function() {
+                    this.zoneRadius *= 0.9;
+                    this.zone.setRadius(this.zoneRadius);
+                    document.getElementById('zone').textContent = Math.round(this.zoneRadius / 4) + '%';
+                },
+                updateUI: function() {
+                    document.getElementById('health').textContent = Math.max(0, Math.round(this.player.health));
+                    if (this.player.health <= 0) alert('Game Over! Reload for new match.');
                 }
             }
         };
@@ -78,3 +133,4 @@
     </script>
 </body>
 </html>
+       
